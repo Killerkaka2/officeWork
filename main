@@ -1,0 +1,102 @@
+package com.sbi.yono.document.batch;
+
+import org.apache.commons.lang.exception.ExceptionUtils;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.JobParametersBuilder;
+import org.springframework.batch.core.JobParametersInvalidException;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.repository.JobExecutionAlreadyRunningException;
+import org.springframework.batch.core.repository.JobInstanceAlreadyCompleteException;
+import org.springframework.batch.core.repository.JobRestartException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.context.event.ApplicationFailedEvent;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import com.tcs.techbone.logger.FLogger;
+
+@SpringBootApplication
+@ComponentScan(basePackages = { "com.sbi.yono.*", "com.tcs.techbone.*" })
+@EntityScan(basePackages = { "com.tcs.techbone.*", "com.sbi.yono.*" })
+@EnableTransactionManagement
+@EnableScheduling
+public class EDMSBatchApplication implements CommandLineRunner {
+
+	private static final String TIER_NAME = "FTBatch";
+	private static final String THIS_CLASS = "BatchApplication";
+	public static final String METHOD_STARTED = "Method started";
+
+	private JobLauncher jobLauncher;
+	private Job ntbsaJobLoader;
+	 private Job retryNtbsaJobLoader;
+
+	@Autowired
+	public EDMSBatchApplication(JobLauncher jobLauncher, @Qualifier("ntbsaJobLoader") Job ntbsaJobLoader,
+			@Qualifier("retryNtbsaJobLoader") Job retryNtbsaJobLoader) {
+		super();
+		this.jobLauncher = jobLauncher;
+		this.ntbsaJobLoader = ntbsaJobLoader;
+		this.retryNtbsaJobLoader = retryNtbsaJobLoader;
+	}
+
+	/**
+	 * @param args
+	 */
+	public static void main(String[] args) {
+		SpringApplication app = new SpringApplication(EDMSBatchApplication.class);
+		app.setRegisterShutdownHook(true);
+		app.addListeners((ApplicationListener<ApplicationFailedEvent>) event -> {
+			if (event.getException() instanceof RuntimeException) {
+				FLogger.error(TIER_NAME, EDMSBatchApplication.class.getSimpleName(), "Main method",
+						" Exited with error\n" + ExceptionUtils.getFullStackTrace(event.getException()));
+				System.exit(1);
+			}
+		});
+		ConfigurableApplicationContext context = app.run(args);
+		context.registerShutdownHook();
+		SpringApplication.exit(context, () -> 0);
+
+	}
+
+	/**
+	 *
+	 */
+	public void run(String... args) throws JobExecutionAlreadyRunningException, JobRestartException,
+			JobInstanceAlreadyCompleteException, JobParametersInvalidException {
+		String methodName = "run";
+		FLogger.info(TIER_NAME, THIS_CLASS, methodName, METHOD_STARTED);
+		JobParameters jobParameters = new JobParametersBuilder()
+				.addString("JobID", String.valueOf(System.currentTimeMillis())).toJobParameters();
+
+		if (args.length == 0) {
+			FLogger.info(TIER_NAME, THIS_CLASS, methodName, "No argument found.");
+			return;
+		}
+		String jobName = args[0].split("=")[1];
+
+		switch (jobName.trim()) {
+		case "ntbsaJobLoader":
+			System.out.println("job ntbsaJobLoader" );
+			FLogger.info(TIER_NAME, THIS_CLASS, methodName, "ntbsaJobLoader");
+			jobLauncher.run(ntbsaJobLoader, jobParameters);
+			break;
+		case "retryNtbsaJobLoader":
+			FLogger.info(TIER_NAME, THIS_CLASS, methodName, "retryNtbsaJobLoader");
+			jobLauncher.run(retryNtbsaJobLoader, jobParameters);
+			break;
+		default:
+			FLogger.info(TIER_NAME, THIS_CLASS, methodName, "No such job found.");
+		}
+
+	}
+
+}
