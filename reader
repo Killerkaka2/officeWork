@@ -258,7 +258,6 @@ public class ListReadingRetryItemReader implements ItemReader<List<NtbReq>> {
 	}
 }
 -----------------------------
-
 package com.sbi.yono.document.batch.reader;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -408,3 +407,6 @@ public class ListReadingRetryItemReaderTest {
 
         assertNull(result, "When finished is true, read() must return null");
         assertEquals(0, testJdbcTemplate.getCallCount(),
+                "JdbcTemplate.query should not be called when finished is already true");
+    }
+}
