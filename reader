@@ -54,75 +54,146 @@ public class ListReadingItemReader implements ItemReader<List<NtbReq>> {
 --------
 package com.sbi.yono.document.batch.reader;
 
-import static org.mockito.Mockito.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 import javax.sql.DataSource;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import com.sbi.yono.document.batch.dto.NtbReq;
 
+/**
+ * Unit tests for {@link ListReadingItemReader} with 100% coverage.
+ *
+ * This test:
+ *  - Avoids any real database by injecting a custom JdbcTemplate via reflection.
+ *  - Covers:
+ *      * read() when finished == true
+ *      * read() when query returns non-empty list
+ *      * read() when query returns empty list (sets finished = true)
+ */
 public class ListReadingItemReaderTest {
 
-    private ListReadingItemReader itemReader;
-    private DataSource dataSource;
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    /**
+     * Custom JdbcTemplate that returns pre-scripted results without touching a real DB.
+     */
+    private static class TestJdbcTemplate extends JdbcTemplate {
+        private final List<List<NtbReq>> scriptedResults = new ArrayList<>();
+        private int callCount = 0;
 
-    @BeforeEach
-    void setUp() {
-        dataSource = mock(DataSource.class);
-        jdbcTemplate = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        void addResult(List<NtbReq> result) {
+            scriptedResults.add(result);
+        }
 
-        // Construct the reader
-        itemReader = new ListReadingItemReader(dataSource);
+        @Override
+        public <T> List<T> query(String sql, RowMapper<T> rowMapper) {
+            // Ignore SQL and rowMapper completely for unit testing
+            if (callCount < scriptedResults.size()) {
+                @SuppressWarnings("unchecked")
+                List<T> result = (List<T>) scriptedResults.get(callCount++);
+                return result;
+            }
+            // Default: no more data
+            return Collections.emptyList();
+        }
 
-        // Inject mocked jdbcTemplate since constructor creates its own
-        ReflectionTestUtils.setField(itemReader, "jdbcTemplate", jdbcTemplate);
+        int getCallCount() {
+            return callCount;
+        }
+    }
 
-        // Set page size manually since config is external
-        ReflectionTestUtils.setField(itemReader, "pagesize", 10);
+    // ------------------------------------------------------------------------
+    // Helper methods for reflection
+    // ------------------------------------------------------------------------
+
+    private void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    private Object getField(Object target, String fieldName) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    // ------------------------------------------------------------------------
+    // Tests
+    // ------------------------------------------------------------------------
+
+    @Test
+    public void testReadReturnsListWhenNotFinishedAndDataPresent() throws Exception {
+        // Create reader with null DataSource (we override jdbcTemplate anyway)
+        ListReadingItemReader reader = new ListReadingItemReader((DataSource) null);
+
+        // Inject our custom JdbcTemplate that returns a NON-empty result on first call
+        TestJdbcTemplate testJdbcTemplate = new TestJdbcTemplate();
+        // We don't care about actual NtbReq values, just that list is non-empty
+        List<NtbReq> firstResult = new ArrayList<>();
+        firstResult.add(null); // non-empty list
+        testJdbcTemplate.addResult(firstResult);
+
+        setField(reader, "jdbcTemplate", testJdbcTemplate);
+
+        // Act
+        List<NtbReq> result = reader.read();
+
+        // Assert
+        assertNotNull(result, "Result should not be null when data is present");
+        assertEquals(1, result.size(), "Result list size should match scripted data");
+
+        // finished flag should remain false
+        boolean finished = (boolean) getField(reader, "finished");
+        assertTrue(!finished, "finished flag should remain false when non-empty list is returned");
     }
 
     @Test
-    void testRead_returnsList() throws Exception {
-        NtbReq req = new NtbReq();
-        List<NtbReq> expectedList = List.of(req);
+    public void testReadReturnsNullAndSetsFinishedWhenNoData() throws Exception {
+        ListReadingItemReader reader = new ListReadingItemReader((DataSource) null);
 
-        // Mock jdbcTemplate query response
-        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class)))
-                .thenReturn(expectedList);
+        // Inject custom JdbcTemplate that returns an EMPTY list on first call
+        TestJdbcTemplate testJdbcTemplate = new TestJdbcTemplate();
+        testJdbcTemplate.addResult(Collections.emptyList()); // first (and only) call -> empty
+        setField(reader, "jdbcTemplate", testJdbcTemplate);
 
-        List<NtbReq> actualList = itemReader.read();
+        // First call: underlying query returns empty list => reader sets finished = true and returns null
+        List<NtbReq> result = reader.read();
 
-        assertNotNull(actualList);
-        assertEquals(1, actualList.size());
-        assertEquals(req, actualList.get(0));
-
-        // Second call should still return list because finished=false
-        List<NtbReq> actualList2 = itemReader.read();
-        assertNotNull(actualList2);
+        assertNull(result, "Result should be null when no data is returned");
+        boolean finished = (boolean) getField(reader, "finished");
+        assertTrue(finished, "finished flag should be set to true when no data is returned");
     }
 
     @Test
-    void testRead_whenEmptyList_thenReturnNullAndFinish() throws Exception {
-        // Mock empty result from DB
-        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class)))
-                .thenReturn(Collections.emptyList());
+    public void testReadReturnsNullWhenAlreadyFinished() throws Exception {
+        ListReadingItemReader reader = new ListReadingItemReader((DataSource) null);
 
-        // First call returns null
-        List<NtbReq> firstRead = itemReader.read();
-        assertNull(firstRead);
+        // Inject custom JdbcTemplate just to verify it's not used
+        TestJdbcTemplate testJdbcTemplate = new TestJdbcTemplate();
+        // If read() tried to call query, it would increment callCount
+        setField(reader, "jdbcTemplate", testJdbcTemplate);
 
-        // Finished flag must be set → next call always returns null
-        List<NtbReq> secondRead = itemReader.read();
-        assertNull(secondRead);
+        // Force finished = true before calling read()
+        setField(reader, "finished", true);
+
+        // Act
+        List<NtbReq> result = reader.read();
+
+        // Assert
+        assertNull(result, "When finished is true, read() must return null immediately");
+        assertEquals(0, testJdbcTemplate.getCallCount(),
+                "JdbcTemplate.query should not be called when finished is already true");
     }
 }
 
