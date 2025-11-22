@@ -100,3 +100,152 @@ public class EDMSBatchApplication implements CommandLineRunner {
 	}
 
 }
+
+-----------------------
+
+package com.sbi.yono.document.batch;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.batch.core.Job;
+import org.springframework.batch.core.JobParameters;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ConfigurableApplicationContext;
+
+import com.tcs.techbone.logger.FLogger;
+
+@ExtendWith(MockitoExtension.class)
+public class EDMSBatchApplicationTest {
+
+    @Mock
+    private JobLauncher jobLauncher;
+
+    @Mock
+    private Job ntbsaJobLoader;
+
+    @Mock
+    private Job retryNtbsaJobLoader;
+
+    // ----------------------------------------------------------
+    // Helper: create application under test
+    // ----------------------------------------------------------
+    private EDMSBatchApplication createApp() {
+        return new EDMSBatchApplication(jobLauncher, ntbsaJobLoader, retryNtbsaJobLoader);
+    }
+
+    // ----------------------------------------------------------
+    // Tests for run(...)
+    // ----------------------------------------------------------
+
+    @Test
+    public void testRunWithNoArgumentsDoesNotLaunchAnyJob() throws Exception {
+        EDMSBatchApplication app = createApp();
+
+        try (MockedStatic<FLogger> floggerMock = Mockito.mockStatic(FLogger.class)) {
+            app.run(); // args.length == 0 branch
+        }
+
+        // No job should be launched
+        verifyNoInteractions(jobLauncher);
+    }
+
+    @Test
+    public void testRunWithNtbsaJobLoaderArgumentLaunchesCorrectJob() throws Exception {
+        EDMSBatchApplication app = createApp();
+        String[] args = new String[] { "job=ntbsaJobLoader" };
+
+        try (MockedStatic<FLogger> floggerMock = Mockito.mockStatic(FLogger.class)) {
+            app.run(args);
+        }
+
+        ArgumentCaptor<JobParameters> paramsCaptor = ArgumentCaptor.forClass(JobParameters.class);
+        verify(jobLauncher, times(1)).run(eq(ntbsaJobLoader), paramsCaptor.capture());
+        verify(jobLauncher, never()).run(eq(retryNtbsaJobLoader), any(JobParameters.class));
+
+        JobParameters params = paramsCaptor.getValue();
+        assertNotNull(params.getString("JobID"));
+    }
+
+    @Test
+    public void testRunWithRetryNtbsaJobLoaderArgumentLaunchesCorrectJob() throws Exception {
+        EDMSBatchApplication app = createApp();
+        String[] args = new String[] { "job=retryNtbsaJobLoader" };
+
+        try (MockedStatic<FLogger> floggerMock = Mockito.mockStatic(FLogger.class)) {
+            app.run(args);
+        }
+
+        ArgumentCaptor<JobParameters> paramsCaptor = ArgumentCaptor.forClass(JobParameters.class);
+        verify(jobLauncher, times(1)).run(eq(retryNtbsaJobLoader), paramsCaptor.capture());
+        verify(jobLauncher, never()).run(eq(ntbsaJobLoader), any(JobParameters.class));
+
+        JobParameters params = paramsCaptor.getValue();
+        assertNotNull(params.getString("JobID"));
+    }
+
+    @Test
+    public void testRunWithUnknownJobNameDoesNotLaunchAnyJob() throws Exception {
+        EDMSBatchApplication app = createApp();
+        String[] args = new String[] { "job=unknownJob" };
+
+        try (MockedStatic<FLogger> floggerMock = Mockito.mockStatic(FLogger.class)) {
+            app.run(args);
+        }
+
+        verifyNoInteractions(jobLauncher);
+    }
+
+    // ----------------------------------------------------------
+    // Test for main(...)
+    // ----------------------------------------------------------
+
+    @Test
+    public void testMainMethodExecutesWithoutStartingRealSpringContext() {
+        String[] args = new String[] { "job=ntbsaJobLoader" };
+
+        // Mock construction of SpringApplication
+        try (MockedConstruction<SpringApplication> mockedConstruction =
+                     Mockito.mockConstruction(SpringApplication.class,
+                             (mock, context) -> {
+                                 ConfigurableApplicationContext ctx = mock(ConfigurableApplicationContext.class);
+                                 when(mock.run(any(String[].class))).thenReturn(ctx);
+                             });
+             // Mock static methods of SpringApplication.exit(...)
+             MockedStatic<SpringApplication> springAppStatic =
+                     Mockito.mockStatic(SpringApplication.class, Mockito.CALLS_REAL_METHODS);
+             // Mock static logger to avoid external logging behaviour
+             MockedStatic<FLogger> floggerMock = Mockito.mockStatic(FLogger.class)) {
+
+            // Stub SpringApplication.exit to avoid any side effects
+            springAppStatic.when(() ->
+                    SpringApplication.exit(any(ConfigurableApplicationContext.class), any()))
+                    .thenReturn(0);
+
+            // Call main
+            EDMSBatchApplication.main(args);
+
+            // Verify SpringApplication was constructed
+            SpringApplication constructed = mockedConstruction.constructed().get(0);
+            verify(constructed, times(1)).setRegisterShutdownHook(true);
+            verify(constructed, times(1)).addListeners(any());
+            verify(constructed, times(1)).run(any(String[].class));
+
+            // Verify SpringApplication.exit was invoked
+            springAppStatic.verify(
+                    () -> SpringApplication.exit(any(ConfigurableApplicationContext.class), any()),
+                    times(1));
+        }
+    }
+}
