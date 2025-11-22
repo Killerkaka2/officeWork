@@ -51,8 +51,80 @@ public class ListReadingItemReader implements ItemReader<List<NtbReq>> {
 
 	}
 }
+--------
+package com.sbi.yono.document.batch.reader;
 
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.Collections;
+import java.util.List;
+
+import javax.sql.DataSource;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import com.sbi.yono.document.batch.dto.NtbReq;
+
+public class ListReadingItemReaderTest {
+
+    private ListReadingItemReader itemReader;
+    private DataSource dataSource;
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void setUp() {
+        dataSource = mock(DataSource.class);
+        jdbcTemplate = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+
+        // Construct the reader
+        itemReader = new ListReadingItemReader(dataSource);
+
+        // Inject mocked jdbcTemplate since constructor creates its own
+        ReflectionTestUtils.setField(itemReader, "jdbcTemplate", jdbcTemplate);
+
+        // Set page size manually since config is external
+        ReflectionTestUtils.setField(itemReader, "pagesize", 10);
+    }
+
+    @Test
+    void testRead_returnsList() throws Exception {
+        NtbReq req = new NtbReq();
+        List<NtbReq> expectedList = List.of(req);
+
+        // Mock jdbcTemplate query response
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class)))
+                .thenReturn(expectedList);
+
+        List<NtbReq> actualList = itemReader.read();
+
+        assertNotNull(actualList);
+        assertEquals(1, actualList.size());
+        assertEquals(req, actualList.get(0));
+
+        // Second call should still return list because finished=false
+        List<NtbReq> actualList2 = itemReader.read();
+        assertNotNull(actualList2);
+    }
+
+    @Test
+    void testRead_whenEmptyList_thenReturnNullAndFinish() throws Exception {
+        // Mock empty result from DB
+        when(jdbcTemplate.query(anyString(), any(org.springframework.jdbc.core.RowMapper.class)))
+                .thenReturn(Collections.emptyList());
+
+        // First call returns null
+        List<NtbReq> firstRead = itemReader.read();
+        assertNull(firstRead);
+
+        // Finished flag must be set → next call always returns null
+        List<NtbReq> secondRead = itemReader.read();
+        assertNull(secondRead);
+    }
+}
 
 -----------------------------------------------------
 
