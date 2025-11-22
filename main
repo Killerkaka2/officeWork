@@ -249,3 +249,34 @@ public class EDMSBatchApplicationTest {
         }
     }
 }
+
+
+---------------------------------
+
+@Override
+public List<NtbReq> read() throws Exception, UnexpectedInputException, ParseException {
+
+    if (finished) {
+        return null;
+    }
+
+    String sql = new StringBuilder()
+            .append("SELECT t1.ref_no, t1.cfr, t1.channel_id, t1.updated_dt, t1.old_id, ")
+            .append("t2.crn_no, t3.crn_name, t3.mobile_no, t3.pan, t3.pan_cds AS panCd ")
+            .append("FROM yb_nom_cnfrm t1 ")
+            .append("INNER JOIN yb_nom_cred t2 ON t1.ref_no = t2.ref_no ")
+            .append("INNER JOIN yb_nom_crn t3 ON t2.ref_no = t3.ref_no ")
+            .append("WHERE t1.channel_id IN ('ZNOMSSA','ZNOMSSB','ZNOMBSSA','ZNOMBSSB') ")
+            .append("ORDER BY t1.updated_dt DESC ")
+            .append("LIMIT ").append(pagesize)
+            .toString();
+
+    List<NtbReq> list = jdbcTemplate.query(sql, new NtbReqRowMapper(NtbReq.class));
+
+    if (list.isEmpty()) {
+        finished = true;
+        return null;
+    }
+
+    return list;
+}
