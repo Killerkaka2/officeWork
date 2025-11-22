@@ -1,0 +1,109 @@
+package com.sbi.yono.document.batch.reader;
+
+import java.util.List;
+
+import javax.sql.DataSource;
+
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ParseException;
+import org.springframework.batch.item.UnexpectedInputException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import com.sbi.yono.document.batch.dto.NtbReq;
+import com.sbi.yono.document.batch.rowmapper.NtbReqRowMapper;
+import com.sbi.yono.document.savingsaccount.edms.upload.EdmsUploadConstants;
+import com.tcs.techbone.channel.global.reader.GlobalConfigPropertiesReader;
+
+@Component
+public class ListReadingItemReader implements ItemReader<List<NtbReq>> {
+
+	private final JdbcTemplate jdbcTemplate;
+	int pagesize = Integer.parseInt((String) GlobalConfigPropertiesReader.getInstance().getPropertyById(EdmsUploadConstants.EDMS_SEGEMENT_SIZE));
+	boolean finished = false;
+
+	public ListReadingItemReader(DataSource dataSource) {
+		this.jdbcTemplate = new JdbcTemplate();
+		this.jdbcTemplate.setDataSource(dataSource);
+	}
+
+	@Override
+	public List<NtbReq> read() throws Exception, UnexpectedInputException, ParseException {
+
+		if (finished) {
+			return null;
+		}
+		List<NtbReq> list = jdbcTemplate.query("select t1.ref_no, t1.cif,t1.channel_id,t1.updated_dt ,t1.job_id, \r\n"
+				+ "t2.acnt_nmbr,t2.updtd_dt as crtn_dt,t2.isd_cd,\r\n"
+				+ "t3.frst_nm,t3.last_nm,t3.mddle_nm,t3.brnch_cd,t3.ckyc_no,t3.mbl_no,t3.pan_dtls->>'pan' As pan\r\n"
+				+ "from yono_dcmnt.edms_req AS t1\r\n"
+				+ "INNER JOIN yono_accnt.accnt_onbrdng AS t2 ON t1.ref_no = t2.ref_no\r\n"
+				+ "INNER JOIN yono_cstmr.cstmr_onbrdng AS t3 ON t2.ref_no = t3.ref_no\r\n"
+				+ "where channel_id in ('Y2NDSSA','Y2NBNSA','Y2NBSSA')\r\n" + "order by updated_dt asc limit "
+				+ pagesize, new NtbReqRowMapper(NtbReq.class));
+		
+		if (list.isEmpty()) {
+			finished = true;
+			return null;
+		}
+		return list;
+
+	}
+}
+
+
+
+-----------------------------------------------------
+
+package com.sbi.yono.document.batch.reader;
+
+import java.util.List;
+
+import javax.sql.DataSource;
+
+import org.springframework.batch.item.ItemReader;
+import org.springframework.batch.item.ParseException;
+import org.springframework.batch.item.UnexpectedInputException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import com.sbi.yono.document.batch.dto.NtbReq;
+import com.sbi.yono.document.batch.rowmapper.NtbReqRowMapper;
+import com.sbi.yono.document.savingsaccount.edms.upload.EdmsUploadConstants;
+import com.tcs.techbone.channel.global.reader.GlobalConfigPropertiesReader;
+
+@Component
+public class ListReadingRetryItemReader implements ItemReader<List<NtbReq>> {
+
+	private final JdbcTemplate jdbcTemplate;
+	int pagesize = Integer.parseInt((String) GlobalConfigPropertiesReader.getInstance().getPropertyById(EdmsUploadConstants.EDMS_SEGEMENT_SIZE));
+	private boolean finished = false;
+
+	public ListReadingRetryItemReader(DataSource dataSource) {
+		this.jdbcTemplate = new JdbcTemplate();
+		this.jdbcTemplate.setDataSource(dataSource);
+	}
+
+	@Override
+	public List<NtbReq> read() throws Exception, UnexpectedInputException, ParseException {
+		if (finished) {
+			return null;
+		}
+		List<NtbReq> list = jdbcTemplate.query("select t1.ref_no, t1.cif,t1.channel_id,t1.updtd_dt ,t1.job_id, \r\n"
+				+ "t2.acnt_nmbr,t2.updtd_dt as crtn_dt,t2.isd_cd,\r\n"
+				+ "t3.frst_nm,t3.last_nm,t3.mddle_nm,t3.brnch_cd,t3.ckyc_no,t3.mbl_no,t3.pan_dtls->>'pan' As pan\r\n"
+				+ "from yono_dcmnt.edms_req AS t1\r\n"
+				+ "INNER JOIN yono_accnt.accnt_onbrdng AS t2 ON t1.ref_no = t2.ref_no\r\n"
+				+ "INNER JOIN yono_cstmr.cstmr_onbrdng AS t3 ON t2.ref_no = t3.ref_no\r\n"
+				+ "where channel_id in ('Y2NBNSA')\r\n" + "order by t1.updtd_dt asc limit "
+				+ pagesize, new NtbReqRowMapper(NtbReq.class));
+		if (list.isEmpty()) {
+			finished = true;
+			return null;
+		}
+		return list;
+
+	}
+}
