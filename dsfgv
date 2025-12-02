@@ -140,4 +140,21 @@
         "idType": "09",
         "scannedDate": ""
     }
+} JsonObject root = JsonParser.parseString(jsonString).getAsJsonObject();
+
+// Iterate through all keys
+for (String key : root.keySet()) {
+    JsonElement element = root.get(key);
+
+    // If value is an object and it contains base64Str, update it
+    if (element.isJsonObject()) {
+        JsonObject obj = element.getAsJsonObject();
+        if (obj.has("base64Str")) {
+            obj.addProperty("base64Str", "");
+        }
+    }
 }
+
+String updated = new Gson().toJson(root);
+System.out.println(updated);
+
